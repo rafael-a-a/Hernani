@@ -45,12 +45,14 @@ long distance;
 fsm_t fsm1, fsm2, fsm3, fsm4, fsm5, fsm6, fsm7, fsm8, fsm9, fsm10, fsm11;
 */
 
+fsm_t creep_forward, rotate_left, wiggle, adjust;
+
 unsigned long interval, last_cycle = 0;
 unsigned long loop_micros;
 
 void set_state(fsm_t& fsm, int new_state)
 {
-  if (fsm.state != new_state) {  // if the state chnanged tis is reset
+  if (fsm.state != new_state) {  // if the state changed tis is reset
     fsm.state = new_state;
     fsm.tes = millis();
     fsm.tis = 0;
@@ -80,6 +82,7 @@ float calcDutyCycle(int servo, float angle){
       dc = 10.0/180.0*angle + 2.95;
       return dc;
     case servo6:
+      
       dc = 9.8/180.0*angle + 3;
       return dc;
     case servo7:
@@ -102,6 +105,28 @@ float calcDutyCycle(int servo, float angle){
   return 3; // aprox 0º
 }
 
+unsigned long read_pulse(int pin)
+{
+    static unsigned long rising_time;  // time of the rising edge
+    static int last_state;             // previous pin state
+    int state = digitalRead(pin);      // current pin state
+    unsigned long pulse_length = 0;    // default return value
+
+    // On rising edge: record current time.
+    if (last_state == LOW && state == HIGH) {
+        rising_time = micros();
+    }
+
+    // On falling edge: report pulse length.
+    if (last_state == HIGH && state == LOW) {
+        unsigned long falling_time = micros();
+        pulse_length = falling_time - rising_time;
+    }
+
+    last_state = state;
+    return pulse_length;
+}
+
 float getDistance(){
 
   //returns distance from nearest object in cm
@@ -113,15 +138,19 @@ float getDistance(){
   digitalWrite(trigPin,LOW);
   while (distance == 0){
 
+    
+
     if(state == 0 && micros()-auxtemp > 2){
+      
       state = 1;
       digitalWrite(trigPin,HIGH);
       auxtemp=micros();
       
 
     } else if (state == 1 && micros()-auxtemp > 10){
+      
       digitalWrite(trigPin,LOW);
-      sonarDuration = pulseIn(echoPin, HIGH);
+      sonarDuration = read_pulse(echoPin);
       distance = sonarDuration * 0.034 / 2;
       auxtemp = micros();
       state = 0;
@@ -143,7 +172,9 @@ double getPitch(){
     fx = myIMU.readFloatAccelX();
     fz = myIMU.readFloatAccelZ();
     fy = myIMU.readFloatAccelY();
-    angle = asin(fx/sqrt(pow(fx,2) + pow(fy,2) + pow(fz,2) ) ) * 180.0 / 3.14;
+    Serial.println(fx);
+
+    angle = asin(fy/sqrt(pow(fx,2) + pow(fy,2) + pow(fz,2) ) ) * 180.0 / 3.14;
 
     return angle;
 
@@ -159,16 +190,80 @@ double getRoll(){
     fx = myIMU.readFloatAccelX();
     fz = myIMU.readFloatAccelZ();
     fy = myIMU.readFloatAccelY();
-    angle = acos(fy/sqrt(pow(fx,2) + pow(fy,2) + pow(fz,2) ) ) * 180.0 / 3.14;
+    angle = acos(fx/sqrt(pow(fx,2) + pow(fy,2) + pow(fz,2) ) ) * 180.0 / 3.14;
 
-    return angle;
+    return angle - 90;
 
 }
 
+void rot_l(){
+  if(rotate_left.state == 0 && rotate_left.tis > 100){
+   
+    rotate_left.new_state = 1;
+  }
+  else if(rotate_left.state == 1 && rotate_left.tis > 100){
+   
+    rotate_left.new_state = 2;
+  }
+  else if(rotate_left.state == 2 && rotate_left.tis > 100){
+   
+    rotate_left.new_state = 3;
+  }
+  else if(rotate_left.state == 3 && rotate_left.tis > 100){
+
+    rotate_left.new_state = 4;
+  }
+  else if(rotate_left.state == 4 && rotate_left.tis > 100){
+
+    rotate_left.new_state = 0;
+  }else if(rotate_left.state == 10 && adjust.state == 1){
+    rotate_left.new_state = 0;
+  }else if(rotate_left.state > 0 && adjust.state == 0){
+    rotate_left.new_state = 10;
+  }
+  
+}
+
+int cont = 0;
+int cont2 = 0;
+
+void wig(){
+  if(wiggle.state == 0 && wiggle.tis > 1000){
+    wiggle.new_state = 1;
+  }else if(wiggle.state == 1 && wiggle.tis > 500){
+    wiggle.new_state = 2;
+  }else if(wiggle.state == 2 && wiggle.tis > 500){
+    wiggle.new_state = 3;
+    cont++;
+  }else if(wiggle.state == 3 && cont == 7){
+    wiggle.new_state = 4;
+  }else if(wiggle.state == 4 && wiggle.tis > 300){
+    wiggle.new_state = 5;
+    cont = 0;
+  }else if(wiggle.state == 3 && wiggle.tis > 100 && cont < 7){
+    wiggle.new_state = 2;
+  }else if(wiggle.state == 5 && wiggle.tis > 200 && cont < 10){
+    wiggle.new_state = 6;
+    cont2++;
+  }else if(wiggle.state == 6 && wiggle.tis > 200 && cont < 10){
+    wiggle.new_state = 5;
+  }else if( (wiggle.state == 5 || wiggle.state == 6) && cont2 > 10){
+    wiggle.new_state = 0;
+    cont2 = 0;
+  }
+}
+
+void adj(){
+  if(adjust.state == 0 && adjust.tis > 12000){
+    adjust.new_state = 1;
+  }else if(adjust.state == 1 && adjust.tis > 400){
+    adjust.new_state = 0;
+  }
+}
+
 float frequency = 50;
-
+int wiggleval;
 double thetaP, thetaR;
-
 
 void setup()
 {
@@ -177,7 +272,7 @@ void setup()
   //Accel VCC-3.3V
  
   interval = 10;
-  //set_state(fsm1, 0);
+  
 
   //uint32_t PWM_Pins[]       = { servo1, servo2, servo5, servo6, servo7, servo8, servo9, servo10 };
 
@@ -190,6 +285,11 @@ void setup()
     PWM_Instance[index] = new RP2040_PWM(PWM_Pins[index], frequency, dutyCycle[index]);
   }
 
+  set_state(creep_forward,0);
+  set_state(rotate_left,10);  //not working right, careful when calling rot_l and setstate in loop
+  set_state(wiggle,10);
+  set_state(adjust,0);
+
   myIMU.begin();
 }
 
@@ -201,6 +301,7 @@ void loop()
 
   if(now - last_cycle > interval){
 
+  
     //update inputs
     //distance = getDistance();
     thetaP = getPitch();
@@ -208,36 +309,358 @@ void loop()
 
     Serial.println("Pitch:");
     Serial.println(thetaP, 2);
+    Serial.println("Roll: ");
     Serial.println(thetaR,2);
     
     Serial.println(distance);
 
-    //uint32_t PWM_Pins[]       = { servo1, servo2, servo5, servo6, servo7, servo8, servo9, servo10 };
-
-    //servo testing
-    dutyCycle[0] = calcDutyCycle(servo1,90);
-    dutyCycle[1] = calcDutyCycle(servo2,90);
-    dutyCycle[6] = calcDutyCycle(servo9,90);
-    dutyCycle[5] = calcDutyCycle(servo8,90);
-    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
-    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
-    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
-    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
-
-
-    delay(1000);
+    unsigned long cur_time = millis();
+    creep_forward.tis = cur_time - creep_forward.tes;
+    rotate_left.tis = cur_time - rotate_left.tes;
+    wiggle.tis = cur_time - wiggle.tes;
+    adjust.tis = cur_time - adjust.tes;
     
-    dutyCycle[0] = calcDutyCycle(servo1,0);
-    dutyCycle[1] = calcDutyCycle(servo2,0);
-    dutyCycle[6] = calcDutyCycle(servo9,0);
-    dutyCycle[5] = calcDutyCycle(servo8,0);
-  
-    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
-    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
-    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
-    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    
+    //uint32_t PWM_Pins[]       = { servo1, servo2, servo5, servo6, servo7, servo8, servo9, servo10 }; para ver quais servos em que pinos
+    //servo 9 together w 10, servo6 w 8
+    //servo testing
+    
+    rot_l();
+    wig();
+    adj();
 
-    delay(1000);
+    if(creep_forward.state == 0 && creep_forward.tis > 200 && adjust.state != 1){
+
+      creep_forward.new_state = 1;
+
+    }else if(creep_forward.state == 1 && creep_forward.tis > 100 && adjust.state != 1){
+
+      creep_forward.new_state = 7;
+
+    }else if(creep_forward.state == 7 && creep_forward.tis > 200 && adjust.state != 1){
+      creep_forward.new_state = 2;
+    }
+    else if(creep_forward.state == 2 && creep_forward.tis > 200 && adjust.state != 1){
+
+      creep_forward.new_state = 3;
+
+    }else if(creep_forward.state == 8 && creep_forward.tis > 200 && adjust.state != 1){
+
+      creep_forward.new_state = 4;
+
+    }
+    else if(creep_forward.state == 3 && creep_forward.tis > 100 && adjust.state != 1){
+
+      creep_forward.new_state = 8;
+
+    }else if(creep_forward.state == 4 && creep_forward.tis > 100 && adjust.state != 1){
+
+      creep_forward.new_state = 9;
+
+    }else if(creep_forward.state == 9 && creep_forward.tis > 200 && adjust.state != 1){
+
+      creep_forward.new_state = 5;
+
+    }
+    else if(creep_forward.state == 5 && creep_forward.tis > 300 && adjust.state != 1){
+
+      creep_forward.new_state = 6;
+
+    }else if(creep_forward.state == 6 && creep_forward.tis > 80 && adjust.state != 1){
+
+      creep_forward.new_state = 10;
+
+    }else if(creep_forward.state == 10 && creep_forward.tis > 100 && adjust.state != 1){
+
+      creep_forward.new_state = 0;
+
+    }else if(creep_forward.state > 0 && adjust.state == 1){
+      creep_forward.new_state = 50;
+    }else if(creep_forward.state == 50 && adjust.state == 0){
+      creep_forward.new_state = 0;
+    }
+
+    set_state(creep_forward,creep_forward.new_state);
+    set_state(rotate_left,rotate_left.new_state); // change to rotate_left.new_state
+    set_state(wiggle,10);
+    set_state(adjust,adjust.new_state);
+
+    //creep_forward outputs
+    if(creep_forward.state == 0){
+      dutyCycle[1] = calcDutyCycle(servo2,90);
+      dutyCycle[6] = calcDutyCycle(servo9,90);
+      dutyCycle[5] = calcDutyCycle(servo8,45);
+      dutyCycle[0] = calcDutyCycle(servo1,45);
+      dutyCycle[4] = calcDutyCycle(servo7,0);
+      PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]); 
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+      
+    }else if(creep_forward.state == 1){
+      dutyCycle[7] = calcDutyCycle(servo10,50);
+      dutyCycle[6] = calcDutyCycle(servo9,20);
+      dutyCycle[1] = calcDutyCycle(servo2,90);
+      dutyCycle[5] = calcDutyCycle(servo8,45);
+      dutyCycle[0] = calcDutyCycle(servo1,45);
+      PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]); 
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    }else if(creep_forward.state == 2){
+      
+      dutyCycle[6] = calcDutyCycle(servo9,45);
+      dutyCycle[1] = calcDutyCycle(servo2,45);
+      dutyCycle[5] = calcDutyCycle(servo8,20);
+      dutyCycle[0] = calcDutyCycle(servo1,90);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]); 
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    }else if(creep_forward.state == 3){
+      dutyCycle[3] = calcDutyCycle(servo6,50);
+      dutyCycle[6] = calcDutyCycle(servo9,45);
+      dutyCycle[1] = calcDutyCycle(servo2,45);
+      dutyCycle[5] = calcDutyCycle(servo8,90);
+      dutyCycle[0] = calcDutyCycle(servo1,90);
+      PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]); 
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    }else if(creep_forward.state == 4){
+      dutyCycle[2] = calcDutyCycle(servo5,50);
+      dutyCycle[0] = calcDutyCycle(servo1,10);
+      dutyCycle[5] = calcDutyCycle(servo8,90);
+      dutyCycle[6] = calcDutyCycle(servo9,45);
+      dutyCycle[1] = calcDutyCycle(servo2,45);
+      PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]); 
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    }else if(creep_forward.state == 5){
+      dutyCycle[0] = calcDutyCycle(servo1,45);
+      dutyCycle[5] = calcDutyCycle(servo8,45);
+      dutyCycle[6] = calcDutyCycle(servo9,90);
+      dutyCycle[1] = calcDutyCycle(servo2,20);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]); 
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    }else if(creep_forward.state == 6){
+      dutyCycle[0] = calcDutyCycle(servo1,45);
+      dutyCycle[4] = calcDutyCycle(servo7,50);
+      dutyCycle[5] = calcDutyCycle(servo8,45);
+      dutyCycle[6] = calcDutyCycle(servo9,90);
+      dutyCycle[1] = calcDutyCycle(servo2,90);
+      PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]); 
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    }else if(creep_forward.state == 7){
+      dutyCycle[7] = calcDutyCycle(servo10,0);
+      PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    }else if(creep_forward.state == 8){
+      dutyCycle[3] = calcDutyCycle(servo6,0);
+      PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    }else if(creep_forward.state == 9){
+      dutyCycle[2] = calcDutyCycle(servo5,0);
+      PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    }else if(creep_forward.state == 10){
+      dutyCycle[4] = calcDutyCycle(servo7,0);
+      PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    }
+     
+     //rotate left outputs
+
+  if(rotate_left.state == 0){
+    dutyCycle[7] = calcDutyCycle(servo10,0);
+    dutyCycle[6] = calcDutyCycle(servo9,45);  
+    dutyCycle[3] = calcDutyCycle(servo6,0);  
+    dutyCycle[5] = calcDutyCycle(servo8,45);  
+    dutyCycle[0] = calcDutyCycle(servo1,45);
+    dutyCycle[2] = calcDutyCycle(servo5,0);
+    dutyCycle[1] = calcDutyCycle(servo2,45);
+    dutyCycle[4] = calcDutyCycle(servo7,0);
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+  }
+ 
+  else if(rotate_left.state == 1){
+    dutyCycle[7] = calcDutyCycle(servo10,0);
+    dutyCycle[6] = calcDutyCycle(servo9,70);  //leg2 bw  
+    dutyCycle[3] = calcDutyCycle(servo6,0);  
+    dutyCycle[5] = calcDutyCycle(servo8,70);  //leg3 fw  
+    dutyCycle[0] = calcDutyCycle(servo1,70);  //leg1 bw
+    dutyCycle[2] = calcDutyCycle(servo5,20);  //leg1 up
+    dutyCycle[1] = calcDutyCycle(servo2,70);  //leg4 fw
+    dutyCycle[4] = calcDutyCycle(servo7,20);  //leg4 up
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+  }
+
+  else if(rotate_left.state == 2){
+    dutyCycle[7] = calcDutyCycle(servo10,0);
+    dutyCycle[6] = calcDutyCycle(servo9,70);    
+    dutyCycle[3] = calcDutyCycle(servo6,0);  
+    dutyCycle[5] = calcDutyCycle(servo8,70);  
+    dutyCycle[0] = calcDutyCycle(servo1,70);  
+    dutyCycle[2] = calcDutyCycle(servo5,0);   //leg1 dn
+    dutyCycle[1] = calcDutyCycle(servo2,70);  
+    dutyCycle[4] = calcDutyCycle(servo7,0);   //leg4 dn
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+  }
+
+  else if(rotate_left.state == 3){
+    dutyCycle[7] = calcDutyCycle(servo10,20); //leg2 up
+    dutyCycle[6] = calcDutyCycle(servo9,20);  //leg2 fw  
+    dutyCycle[3] = calcDutyCycle(servo6,20);  //leg3 up  
+    dutyCycle[5] = calcDutyCycle(servo8,20);  //leg3 bw
+    dutyCycle[0] = calcDutyCycle(servo1,20);  //leg1 fw
+    dutyCycle[2] = calcDutyCycle(servo5,0);
+    dutyCycle[1] = calcDutyCycle(servo2,20);  //leg4 bw
+    dutyCycle[4] = calcDutyCycle(servo7,0);
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+  }
+  else if(rotate_left.state == 4){
+    dutyCycle[7] = calcDutyCycle(servo10,0); //leg2 dn
+    dutyCycle[6] = calcDutyCycle(servo9,20);  
+    dutyCycle[3] = calcDutyCycle(servo6,0);  //leg3 dn  
+    dutyCycle[5] = calcDutyCycle(servo8,20);  
+    dutyCycle[0] = calcDutyCycle(servo1,20);  
+    dutyCycle[2] = calcDutyCycle(servo5,0);
+    dutyCycle[1] = calcDutyCycle(servo2,20);  
+    dutyCycle[4] = calcDutyCycle(servo7,0);
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+  }
+
+  //wiggle state
+
+  if(wiggle.state == 0){
+    dutyCycle[7] = calcDutyCycle(servo10,0); //leg2 dn
+    dutyCycle[6] = calcDutyCycle(servo9,80);  
+    dutyCycle[3] = calcDutyCycle(servo6,0);  //leg3 dn  
+    dutyCycle[5] = calcDutyCycle(servo8,80);  
+    dutyCycle[0] = calcDutyCycle(servo1,80);  
+    dutyCycle[2] = calcDutyCycle(servo5,0);
+    dutyCycle[1] = calcDutyCycle(servo2,80);  
+    dutyCycle[4] = calcDutyCycle(servo7,0);
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+    wiggleval = 80;
+  }else if(wiggle.state == 1){
+    dutyCycle[0] = calcDutyCycle(servo1,20);
+    dutyCycle[6] = calcDutyCycle(servo9,20);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+
+  }else if(wiggle.state == 2){
+    dutyCycle[2] = calcDutyCycle(servo5,70);
+    dutyCycle[7] = calcDutyCycle(servo10,70);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+  }else if(wiggle.state == 3 && wiggleval > 10){
+    wiggleval -= 10;
+    dutyCycle[5] = calcDutyCycle(servo8,wiggleval);  
+    dutyCycle[1] = calcDutyCycle(servo2,wiggleval);  
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+  }else if(wiggle.state == 5){
+    dutyCycle[5] = calcDutyCycle(servo8,60);
+    dutyCycle[1] = calcDutyCycle(servo2,60);
+    dutyCycle[2] = calcDutyCycle(servo5,70);
+    dutyCycle[7] = calcDutyCycle(servo10,70); //leg2 dn
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+  }else if(wiggle.state == 6){
+    dutyCycle[5] = calcDutyCycle(servo8,10);
+    dutyCycle[1] = calcDutyCycle(servo2,10);
+    dutyCycle[2] = calcDutyCycle(servo5,0);
+    dutyCycle[7] = calcDutyCycle(servo10,0); //leg2 dn
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+  }
+
+   
+    Serial.print("rotate left state: ");
+    Serial.println(rotate_left.new_state);
+    Serial.print("creep forward state: ");
+    Serial.println(creep_forward.new_state);
+    Serial.print("wiggle state: ");
+    Serial.println(wiggle.new_state);
+    Serial.print("Contador2: ");
+    Serial.print(cont2);
+    
+    /*
+    dutyCycle[2] = calcDutyCycle(servo5,30); // servo 5
+    dutyCycle[4] = calcDutyCycle(servo7,30);
+    dutyCycle[7] = calcDutyCycle(servo10,30);
+    dutyCycle[3] = calcDutyCycle(servo6,30);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]); 
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]); 
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]); 
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+
+
+    //dutyCycle[6] = calcDutyCycle(servo9,65); //servo8
+    
+    dutyCycle[5] = calcDutyCycle(servo8,25); //servo7
+    dutyCycle[0] = calcDutyCycle(servo1,65);
+    dutyCycle[1] = calcDutyCycle(servo2,25);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]); //servo8
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]); //servo7
+    //PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]); 
+    //PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);*/ 
+    
+    
+    
 
   }
 
