@@ -18,6 +18,8 @@
 #define servo10   9    // PWM channel 7A
 #define echoPin   16
 #define trigPin   17
+#define NUM_SAMPLES 300
+#define alpha 0.5
 
 
 uint32_t PWM_Pins[]       = { servo1, servo2, servo5, servo6, servo7, servo8, servo9, servo10 };
@@ -45,7 +47,7 @@ long distance;
 fsm_t fsm1, fsm2, fsm3, fsm4, fsm5, fsm6, fsm7, fsm8, fsm9, fsm10, fsm11;
 */
 
-fsm_t creep_forward, rotate_left, wiggle, adjust;
+fsm_t creep_forward, rotate_left, wiggle, adjust, self_balance, sonar_core1;
 
 unsigned long interval, last_cycle = 0;
 unsigned long loop_micros;
@@ -69,6 +71,13 @@ LIS3DH myIMU;
 // calculates pwm necessary for each different servo
 float calcDutyCycle(int servo, float angle){
   float dc;
+
+  if(angle < 0){
+    angle = 0;
+  }
+  if(angle > 160){
+    angle = 160;
+  }
 
   switch(servo){
 
@@ -126,6 +135,9 @@ unsigned long read_pulse(int pin)
     last_state = state;
     return pulse_length;
 }
+//variables for interrupt(sonar)
+uint32_t echo_end,trig_beg;
+int event_trig = 0;
 
 float getDistance(){
 
@@ -136,29 +148,30 @@ float getDistance(){
   float distance=0;
 
   digitalWrite(trigPin,LOW);
-  while (distance == 0){
 
-    
+  while (auxtemp - micros() < 25){
 
-    if(state == 0 && micros()-auxtemp > 2){
+    if(state == 0 && micros() - auxtemp > 2){
       
       state = 1;
       digitalWrite(trigPin,HIGH);
       auxtemp=micros();
       
 
-    } else if (state == 1 && micros()-auxtemp > 10){
+    } else if (state == 1 && micros() - auxtemp > 10){
       
       digitalWrite(trigPin,LOW);
-      sonarDuration = read_pulse(echoPin);
-      distance = sonarDuration * 0.034 / 2;
+      trig_beg = micros();
       auxtemp = micros();
       state = 0;
+      /*sonarDuration = read_pulse(echoPin);
+      distance = sonarDuration * 0.034 / 2;
+      auxtemp = micros();
+      state = 0;*/
     }
     
-
   }
-  return distance;
+  return 1;
 
 }
 
@@ -172,7 +185,7 @@ double getPitch(){
     fx = myIMU.readFloatAccelX();
     fz = myIMU.readFloatAccelZ();
     fy = myIMU.readFloatAccelY();
-    Serial.println(fx);
+    
 
     angle = asin(fy/sqrt(pow(fx,2) + pow(fy,2) + pow(fz,2) ) ) * 180.0 / 3.14;
 
@@ -182,7 +195,7 @@ double getPitch(){
 
 double getRoll(){
 
-    //returns pitch in degrees
+    //returns roll in degrees
 
     double angle;
     double fz,fx,fy;
@@ -220,6 +233,8 @@ void rot_l(){
     rotate_left.new_state = 0;
   }else if(rotate_left.state > 0 && adjust.state == 0){
     rotate_left.new_state = 10;
+  }else if(self_balance.state == 0){
+    rotate_left.new_state = 10;
   }
   
 }
@@ -254,16 +269,69 @@ void wig(){
 }
 
 void adj(){
-  if(adjust.state == 0 && adjust.tis > 12000){
+  if(adjust.state == 0 && adjust.tis > 6000){
     adjust.new_state = 1;
   }else if(adjust.state == 1 && adjust.tis > 400){
     adjust.new_state = 0;
+  }else if(adjust.state == 10){
+    adjust.new_state = 10;
   }
 }
+
+uint32_t echo_beg = 0;
+void echo_rising_edge(){
+  if(digitalRead(echoPin)){
+    echo_beg = micros();
+  }
+  if(!digitalRead(echoPin)){
+    echo_end = micros();
+    distance = (echo_end - echo_beg) / 1e3 * 0.034 / 2;
+  }
+
+  event_trig = 1;
+
+}
+
 
 float frequency = 50;
 int wiggleval;
 double thetaP, thetaR;
+
+/*For balance(PID) control*/
+
+//constants
+float roll_kp = 0.1, roll_kd = 80, roll_ki = 0.00000;
+float pitch_kp = 0.05, pitch_kd = 50, pitch_ki = 0.0;
+//for delta time use cur_time
+float dt;
+
+//setpoint
+float rollTarget = 0, rollError = 0, rollServoValLeft = 0, rollServoValRight = 0;
+float rollErrorOld, rollErrorChange, rollErrorSlope;
+float rollErrorArea = 0;
+
+float pitchTarget = 0, pitchError = 0, pitchServoValLeft = 0, pitchServoValRight = 0;
+float pitchErrorOld, pitchErrorChange, pitchErrorSlope;
+float pitchErrorArea = 0;
+
+float servolVal_6 = 0, servolVal_7 = 0, servolVal_5 = 0, servolVal_10 = 0;
+
+//values set to 0 to make sure the controller is able to work
+// when the system is booted
+
+//Pitch -> 90º to front, -90 to back
+//5,6 +1 for roll
+//7,10 -1 for roll
+
+//matrix of influence
+int M[2][4] = {{1,-1,-1,1},{1,1,-1,-1}};
+/*      
+  Servo    6     7    10     5
+   Roll   |1    -1    -1     1|
+   Pitch  |1     1    -1    -1|
+   
+*/
+
 
 void setup()
 {
@@ -277,22 +345,83 @@ void setup()
   //uint32_t PWM_Pins[]       = { servo1, servo2, servo5, servo6, servo7, servo8, servo9, servo10 };
 
   pinMode(27,OUTPUT);
+  //RIGHT NOW TRIG AND ECHO ARE BEING DECLARED IN CORE1
+  /*
   pinMode(trigPin, OUTPUT); // Sets the trigPin as an OUTPUT
   pinMode(echoPin, INPUT);
-
+  */
   for (uint8_t index = 0; index < 8; index++)
   {
     PWM_Instance[index] = new RP2040_PWM(PWM_Pins[index], frequency, dutyCycle[index]);
   }
 
-  set_state(creep_forward,0);
-  set_state(rotate_left,10);  //not working right, careful when calling rot_l and setstate in loop
-  set_state(wiggle,10);
-  set_state(adjust,0);
+  set_state(creep_forward,50); //0 to walk, 50 to turn off
+  set_state(rotate_left,10);  //not worroll_king right, careful when calling rot_l and setstate in loop
+  set_state(wiggle,10);       //0 to wiggle, 10 to turn off
+  set_state(adjust,10);        //0 to walk, 10 to turn off
+  set_state(self_balance,0); //0 to balance, 1 to disable
+  set_state(sonar_core1,0);
+
+  //attachInterrupt(echoPin,echo_rising_edge,CHANGE);
 
   myIMU.begin();
+  
+ 
 }
 
+//setup for second core
+
+void setup1(){
+
+  pinMode(echoPin,INPUT);
+  pinMode(trigPin,OUTPUT);
+  delay(4000);
+
+}
+
+
+int flag = 0;
+
+//loop for second core
+void loop1(){
+
+  
+  static unsigned long last_cycle1 = 0;
+
+  unsigned long curr_time1 = millis();
+  if (curr_time1 - last_cycle1 >= 50) {
+    // Send a pulse to the trigger pin
+    digitalWrite(trigPin, LOW);
+    delayMicroseconds(2);
+    digitalWrite(trigPin, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(trigPin, LOW);
+
+    // Measure the time it takes for the pulse to return
+    long duration1 = pulseIn(echoPin, HIGH);
+
+    // Calculate the distance based on the speed of sound and the time it took for the pulse to return
+    int distance1 = duration1 * 0.034 / 2;
+
+    // Write the distance to the FIFO buffer
+    rp2040.fifo.push_nb(distance1);
+    
+    // Update the last measurement time
+    last_cycle1 = curr_time1;
+  }
+
+    
+    
+}
+
+
+uint32_t distance32;
+
+//Filter for accel
+float samplesAccRoll[NUM_SAMPLES] = {0}, samplesAccPitch[NUM_SAMPLES] = {0};
+float sumRoll = 0, sumPitch = 0;
+int indexRoll = 0, indexPitch = 0;
+float finalRoll, finalPitch = 0;
 
 void loop()
 {
@@ -303,22 +432,117 @@ void loop()
 
   
     //update inputs
-    //distance = getDistance();
+    
+    //ret = getDistance();       ///DONT FORGET TO UNCOMMENT
+
+    /*
+    if(event_trig == 1){
+      distance = (echo_end - trig_beg) / 1e3 * 0.034 / 2.0;
+
+      Serial.print("Times: ");
+      Serial.println(echo_end + " " +  trig_beg);
+      
+      
+    }*/
+
+    /*if(rp2040.fifo.available() > 0){
+      distance = rp2040.fifo.pop();
+    }*/
+
+    //this function does not change the value in distance32 if fifo is empty, and never blocks the execution of the program
+    rp2040.fifo.pop_nb(&distance32);
+    
     thetaP = getPitch();
     thetaR = getRoll();
 
+    
+    Serial.println("Distance");
+    Serial.println(distance32);
+
+    /*
     Serial.println("Pitch:");
     Serial.println(thetaP, 2);
     Serial.println("Roll: ");
     Serial.println(thetaR,2);
-    
-    Serial.println(distance);
+    */
+   
+
+    sumRoll -= samplesAccRoll[indexRoll]; //subtract oldest measurement
+    sumRoll += thetaR; //add to total new measurement
+    samplesAccRoll[indexRoll] = thetaR; //save new measurement
+    indexRoll = (indexRoll + 1) % NUM_SAMPLES; //increase counter (circular array)
+
+    //finalRoll = sumRoll / NUM_SAMPLES; //MAF
+    finalRoll = (1 - alpha) * sumRoll / NUM_SAMPLES + alpha * thetaR;   //exponentially weighted moving average (EWMA) 
+
+    sumPitch -= samplesAccPitch[indexPitch];
+    sumPitch += thetaP;
+    samplesAccPitch[indexPitch] = thetaP;
+    indexPitch = (indexPitch + 1) % NUM_SAMPLES;
+    finalPitch = (1 - alpha) * sumPitch / NUM_SAMPLES + alpha * thetaP;
+
+    dt = now - last_cycle;
+    rollErrorOld = rollError;
+    rollError = rollTarget - finalRoll;
+    rollErrorChange = rollError - rollErrorOld;
+    rollErrorSlope = rollErrorChange / dt;
+    rollErrorArea = rollErrorArea + rollError * dt;
+
+    pitchErrorOld = pitchError;
+    pitchError = pitchTarget - thetaP;
+    pitchErrorChange = pitchError - pitchErrorOld;
+    pitchErrorSlope = pitchErrorChange / dt;
+    pitchErrorArea = pitchErrorArea + pitchError * dt;
+
+   // Left: 5,6 (switched)
+   // Right: 7,10
+   // Front 7,6
+   // Back 10,5
+
+   /*   
+   Servo    6    7    10   5
+   Roll   |1    -1    -1     1|
+   Pitch  |1     1    -1    -1|
+
+   */
+
+    servolVal_10 = servolVal_10 + M[0][2] * (roll_kp * rollError + roll_kd * rollErrorSlope + roll_ki * rollErrorArea) + M[1][2] * (pitch_kp * pitchError + pitch_kd * pitchErrorSlope + pitch_ki * pitchErrorArea);
+    servolVal_7 = servolVal_7 + M[0][1] * (roll_kp * rollError + roll_kd * rollErrorSlope + roll_ki * rollErrorArea) + M[1][1] * (pitch_kp * pitchError + pitch_kd * pitchErrorSlope + pitch_ki * pitchErrorArea);
+    servolVal_6 = servolVal_6 + M[0][0] * (roll_kp * rollError + roll_kd * rollErrorSlope + roll_ki * rollErrorArea) + M[1][0] * (pitch_kp * pitchError + pitch_kd * pitchErrorSlope + pitch_ki * pitchErrorArea);
+    servolVal_5 = servolVal_5 + M[0][3] * (roll_kp * rollError + roll_kd * rollErrorSlope + roll_ki * rollErrorArea) + M[1][3] * (pitch_kp * pitchError + pitch_kd * pitchErrorSlope + pitch_ki * pitchErrorArea);
+     
+    if(servolVal_10 < 0){
+      servolVal_10 = 0;
+    }
+    if(servolVal_10 > 68){
+      servolVal_10 = 68;
+    }
+    if(servolVal_6 < 0){
+      servolVal_6 = 0;
+    }
+    if(servolVal_6 > 68){
+      servolVal_6 = 68;
+    }
+    if(servolVal_5 < 0){
+      servolVal_5 = 0;
+    }
+    if(servolVal_5 > 68){
+      servolVal_5 = 68;
+    }
+    if(servolVal_7 < 0){
+      servolVal_7 = 0;
+    }
+    if(servolVal_7 > 68){
+      servolVal_7 = 68;
+    }
+
 
     unsigned long cur_time = millis();
     creep_forward.tis = cur_time - creep_forward.tes;
     rotate_left.tis = cur_time - rotate_left.tes;
     wiggle.tis = cur_time - wiggle.tes;
     adjust.tis = cur_time - adjust.tes;
+    sonar_core1.tis = cur_time - sonar_core1.tes;
     
     
     //uint32_t PWM_Pins[]       = { servo1, servo2, servo5, servo6, servo7, servo8, servo9, servo10 }; para ver quais servos em que pinos
@@ -333,7 +557,10 @@ void loop()
 
       creep_forward.new_state = 1;
 
-    }else if(creep_forward.state == 1 && creep_forward.tis > 100 && adjust.state != 1){
+    }else if(self_balance.state == 0){     //IF SELFBALANCE ACTIVE, DOESNT CREEP!!!!
+      creep_forward.new_state = 50;
+    }
+    else if(creep_forward.state == 1 && creep_forward.tis > 100 && adjust.state != 1){
 
       creep_forward.new_state = 7;
 
@@ -376,14 +603,27 @@ void loop()
 
     }else if(creep_forward.state > 0 && adjust.state == 1){
       creep_forward.new_state = 50;
-    }else if(creep_forward.state == 50 && adjust.state == 0){
+    }else if(creep_forward.state == 50 && adjust.state == 0 ){
       creep_forward.new_state = 0;
     }
 
+    if(sonar_core1.state == 0 && sonar_core1.tis > 50){
+      sonar_core1.new_state = 1;
+    }else if(sonar_core1.state == 1 && sonar_core1.tis > 5){
+      sonar_core1.new_state = 0;
+    }
+
     set_state(creep_forward,creep_forward.new_state);
-    set_state(rotate_left,rotate_left.new_state); // change to rotate_left.new_state
-    set_state(wiggle,10);
+    set_state(rotate_left,rotate_left.new_state);
+    set_state(wiggle,10); //dont forget to change i want to wiggle
     set_state(adjust,adjust.new_state);
+    set_state(sonar_core1,sonar_core1.new_state);
+
+    if(sonar_core1.state == 0){
+      flag = 0;
+    }else if(sonar_core1.state == 1){
+      flag = 1;
+    }
 
     //creep_forward outputs
     if(creep_forward.state == 0){
@@ -628,15 +868,30 @@ void loop()
     PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
   }
 
+  //balance state
+
+  if(self_balance.state == 0 ){
+    //this first block is to stabilize Hernani
+    dutyCycle[5] = calcDutyCycle(servo8,45);
+    dutyCycle[1] = calcDutyCycle(servo2,45);
+    dutyCycle[0] = calcDutyCycle(servo1,45);
+    dutyCycle[6] = calcDutyCycle(servo9,45);
+    //this is the PID control
+    dutyCycle[2] = calcDutyCycle(servo5,servolVal_5);
+    dutyCycle[3] = calcDutyCycle(servo6,servolVal_6);
+    dutyCycle[7] = calcDutyCycle(servo10,servolVal_10);
+    dutyCycle[4] = calcDutyCycle(servo7,servolVal_7);
+
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+  }
    
-    Serial.print("rotate left state: ");
-    Serial.println(rotate_left.new_state);
-    Serial.print("creep forward state: ");
-    Serial.println(creep_forward.new_state);
-    Serial.print("wiggle state: ");
-    Serial.println(wiggle.new_state);
-    Serial.print("Contador2: ");
-    Serial.print(cont2);
     
     /*
     dutyCycle[2] = calcDutyCycle(servo5,30); // servo 5
@@ -729,5 +984,25 @@ void loop()
   digitalWrite(15,LOW);
   delay(1500);
 
+  
+    if(j < 600){
+      j++;
+    }
+    if(j >= 600 && j < 900){
+      j++;
+      meas[j - 600] = finalRoll;
+    }
+    
+    
+    if(j >= 900){
+      Serial.println("");
+      for(int i = 0; i < j - 600; i++){
+        Serial.print(meas[i],2);
+        Serial.print(",");
+      }
+      Serial.println("");
+    }
+
 
 }*/
+
