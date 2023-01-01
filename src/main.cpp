@@ -40,6 +40,7 @@ uint8_t S1, prevS1, RE_S1;
 uint8_t S2, prevS2, RE_S2;*/
 long sonarDuration;
 long distance;
+uint32_t distance32;
 /*
 // Output variables
 
@@ -47,7 +48,7 @@ long distance;
 fsm_t fsm1, fsm2, fsm3, fsm4, fsm5, fsm6, fsm7, fsm8, fsm9, fsm10, fsm11;
 */
 
-fsm_t creep_forward, rotate_left, wiggle, adjust, self_balance, sonar_core1;
+fsm_t creep_forward, rotate_left,rotate_right, wiggle, adjust, self_balance, sonar_core1,creep_backward,main_controller;
 
 unsigned long interval, last_cycle = 0;
 unsigned long loop_micros;
@@ -114,27 +115,6 @@ float calcDutyCycle(int servo, float angle){
   return 3; // aprox 0º
 }
 
-unsigned long read_pulse(int pin)
-{
-    static unsigned long rising_time;  // time of the rising edge
-    static int last_state;             // previous pin state
-    int state = digitalRead(pin);      // current pin state
-    unsigned long pulse_length = 0;    // default return value
-
-    // On rising edge: record current time.
-    if (last_state == LOW && state == HIGH) {
-        rising_time = micros();
-    }
-
-    // On falling edge: report pulse length.
-    if (last_state == HIGH && state == LOW) {
-        unsigned long falling_time = micros();
-        pulse_length = falling_time - rising_time;
-    }
-
-    last_state = state;
-    return pulse_length;
-}
 //variables for interrupt(sonar)
 uint32_t echo_end,trig_beg;
 int event_trig = 0;
@@ -209,6 +189,8 @@ double getRoll(){
 
 }
 
+int random_int = 0;//to determine if robot turns left(0) or right(1) when obstacle is detected
+
 void rot_l(){
   if(rotate_left.state == 0 && rotate_left.tis > 100){
    
@@ -229,18 +211,124 @@ void rot_l(){
   else if(rotate_left.state == 4 && rotate_left.tis > 100){
 
     rotate_left.new_state = 0;
-  }else if(rotate_left.state == 10 && adjust.state == 1){
+  }else if(rotate_left.state == 10 && ( (adjust.state == 1 && creep_forward.state == 50) || (main_controller.state == 2 && random_int == 0)) ){
     rotate_left.new_state = 0;
   }else if(rotate_left.state > 0 && adjust.state == 0){
     rotate_left.new_state = 10;
-  }else if(self_balance.state == 0){
+  }else if(self_balance.state == 0 || (adjust.state == 10 && main_controller.state != 1) ){
     rotate_left.new_state = 10;
   }
   
 }
 
+void rot_r(){
+   if(rotate_right.state == 0 && rotate_right.tis > 100){
+   
+    rotate_right.new_state = 1;
+  }
+  else if(rotate_right.state == 1 && rotate_right.tis > 100){
+   
+    rotate_right.new_state = 2;
+  }
+  else if(rotate_right.state == 2 && rotate_right.tis > 100){
+   
+    rotate_right.new_state = 3;
+  }
+  else if(rotate_right.state == 3 && rotate_right.tis > 100){
+
+    rotate_right.new_state = 4;
+  }
+  else if(rotate_right.state == 4 && rotate_right.tis > 100){
+
+    rotate_right.new_state = 0;
+  }else if(rotate_right.state == 10  && ( (adjust.state == 1 && creep_backward.state == 50) || (main_controller.state == 2 && random_int == 1))){
+
+    rotate_right.new_state = 0;
+  }else if(rotate_right.state > 0 && adjust.state == 0 ){
+
+    rotate_right.new_state = 10;
+  }else if(self_balance.state == 0 || (adjust.state == 10 && main_controller.state != 1)){
+
+    rotate_right.new_state = 10;
+  }
+}
+
+void c_backward(){  //change this to include main controller, also change creep_forward
+  if(creep_backward.state == 0 && creep_backward.tis > 200){
+
+      creep_backward.new_state = 1;
+
+    }else if(creep_backward.state == 1 && creep_backward.tis > 100){
+
+      creep_backward.new_state = 7;
+
+    }else if(creep_backward.state == 7 && creep_backward.tis > 200){
+      creep_backward.new_state = 2;
+    }
+    else if(creep_backward.state == 2 && creep_backward.tis > 200){
+
+      creep_backward.new_state = 3;
+
+    }else if(creep_backward.state == 8 && creep_backward.tis > 200){
+
+      creep_backward.new_state = 4;
+
+    }
+    else if(creep_backward.state == 3 && creep_backward.tis > 100){
+
+      creep_backward.new_state = 8;
+
+    }else if(creep_backward.state == 4 && creep_backward.tis > 100){
+
+      creep_backward.new_state = 9;
+
+    }else if(creep_backward.state == 9 && creep_backward.tis > 200){
+
+      creep_backward.new_state = 5;
+
+    }
+    else if(creep_backward.state == 5 && creep_backward.tis > 100){
+
+      creep_backward.new_state = 6;
+
+    }else if(creep_backward.state == 6 && creep_backward.tis > 80){
+
+      creep_backward.new_state = 10;
+
+    }else if(creep_backward.state == 10 && creep_backward.tis > 100){
+
+      creep_backward.new_state = 0;
+
+    }else if(self_balance.state == 0 || main_controller.state == 1){ // if the robot is balancing/turning, it cant be moving
+      creep_backward.new_state = 50;
+    }else if(creep_backward.state == 50 && self_balance.state != 0 && main_controller.state == 0){
+      creep_backward.new_state = 0;
+    }
+}
+
+//comparations of distance32 w/ 0 are because sometimes the sensor bugs and reads 0
+void m_cont(){
+
+  if(main_controller.state == 0 && distance32 <= 7 && distance32 != 0){ // when state = 0, walks(creep_backward)
+    main_controller.new_state = 1; //go back
+    randomSeed(millis());
+    random_int = random(2);
+
+  }else if(main_controller.state == 1 && main_controller.tis > 800){
+    main_controller.new_state = 2; // turn left or right
+
+  }else if(main_controller.state == 2 && main_controller.tis > 600 && (distance32 > 15 || distance32 == 0)){ //when state = 1, turns left or right
+    main_controller.new_state = 0; //after turning, if there's space in front, go back to walk
+  }else if(main_controller.state == 50){
+      main_controller.new_state = 50;
+  }
+  
+  //in state 0 does nothing, in state 1 the robot should be moving backwards(creep_forward), in state 2 the robot is turning for a minimum of 600ms
+}
+
 int cont = 0;
 int cont2 = 0;
+
 
 void wig(){
   if(wiggle.state == 0 && wiggle.tis > 1000){
@@ -268,12 +356,13 @@ void wig(){
   }
 }
 
+//fsm for adjusting to the left
 void adj(){
   if(adjust.state == 0 && adjust.tis > 6000){
     adjust.new_state = 1;
   }else if(adjust.state == 1 && adjust.tis > 400){
     adjust.new_state = 0;
-  }else if(adjust.state == 10){
+  }else if(self_balance.state == 0 || main_controller.state == 1){  //dont adjust if its turning
     adjust.new_state = 10;
   }
 }
@@ -356,11 +445,14 @@ void setup()
   }
 
   set_state(creep_forward,50); //0 to walk, 50 to turn off
-  set_state(rotate_left,10);  //not worroll_king right, careful when calling rot_l and setstate in loop
+  set_state(rotate_left,10);  //not working right, careful when calling rot_l and setstate in loop
   set_state(wiggle,10);       //0 to wiggle, 10 to turn off
-  set_state(adjust,10);        //0 to walk, 10 to turn off
-  set_state(self_balance,0); //0 to balance, 1 to disable
+  set_state(adjust,0);        //0 to walk, 10 to turn off
+  set_state(self_balance,1); //0 to balance, 1 to disable
   set_state(sonar_core1,0);
+  set_state(creep_backward,00); //0 to walk, 50 to turn off, this is actually walking forward, not backward
+  set_state(rotate_right,10);
+  set_state(main_controller,0); //controls the obstacle avoidance
 
   //attachInterrupt(echoPin,echo_rising_edge,CHANGE);
 
@@ -375,7 +467,7 @@ void setup1(){
 
   pinMode(echoPin,INPUT);
   pinMode(trigPin,OUTPUT);
-  delay(4000);
+  delay(800);
 
 }
 
@@ -415,7 +507,7 @@ void loop1(){
 }
 
 
-uint32_t distance32;
+
 
 //Filter for accel
 float samplesAccRoll[NUM_SAMPLES] = {0}, samplesAccPitch[NUM_SAMPLES] = {0};
@@ -433,33 +525,18 @@ void loop()
   
     //update inputs
     
-    //ret = getDistance();       ///DONT FORGET TO UNCOMMENT
-
-    /*
-    if(event_trig == 1){
-      distance = (echo_end - trig_beg) / 1e3 * 0.034 / 2.0;
-
-      Serial.print("Times: ");
-      Serial.println(echo_end + " " +  trig_beg);
-      
-      
-    }*/
-
-    /*if(rp2040.fifo.available() > 0){
-      distance = rp2040.fifo.pop();
-    }*/
-
     //this function does not change the value in distance32 if fifo is empty, and never blocks the execution of the program
     rp2040.fifo.pop_nb(&distance32);
     
     thetaP = getPitch();
     thetaR = getRoll();
 
-    
     Serial.println("Distance");
     Serial.println(distance32);
-
     /*
+    
+
+    
     Serial.println("Pitch:");
     Serial.println(thetaP, 2);
     Serial.println("Roll: ");
@@ -543,6 +620,9 @@ void loop()
     wiggle.tis = cur_time - wiggle.tes;
     adjust.tis = cur_time - adjust.tes;
     sonar_core1.tis = cur_time - sonar_core1.tes;
+    creep_backward.tis = cur_time - creep_backward.tes;
+    rotate_right.tis = cur_time - rotate_right.tes;
+    main_controller.tis = cur_time - main_controller.tes;
     
     
     //uint32_t PWM_Pins[]       = { servo1, servo2, servo5, servo6, servo7, servo8, servo9, servo10 }; para ver quais servos em que pinos
@@ -552,12 +632,15 @@ void loop()
     rot_l();
     wig();
     adj();
+    c_backward();
+    rot_r();
+    m_cont();
 
     if(creep_forward.state == 0 && creep_forward.tis > 200 && adjust.state != 1){
 
       creep_forward.new_state = 1;
 
-    }else if(self_balance.state == 0){     //IF SELFBALANCE ACTIVE, DOESNT CREEP!!!!
+    }else if(self_balance.state == 0 || main_controller.state == 1){     //IF SELFBALANCE/turning ACTIVE, DOESNT CREEP!!!!
       creep_forward.new_state = 50;
     }
     else if(creep_forward.state == 1 && creep_forward.tis > 100 && adjust.state != 1){
@@ -601,9 +684,9 @@ void loop()
 
       creep_forward.new_state = 0;
 
-    }else if(creep_forward.state > 0 && adjust.state == 1){
+    }else if(creep_forward.state > 0 && (adjust.state == 1 || creep_backward.state != 50) ){
       creep_forward.new_state = 50;
-    }else if(creep_forward.state == 50 && adjust.state == 0 ){
+    }else if(creep_forward.state == 50 && adjust.state == 0 && self_balance.state == 1 && (main_controller.state == 0 || main_controller.state == 1) && creep_backward.state == 50){
       creep_forward.new_state = 0;
     }
 
@@ -615,9 +698,12 @@ void loop()
 
     set_state(creep_forward,creep_forward.new_state);
     set_state(rotate_left,rotate_left.new_state);
-    set_state(wiggle,10); //dont forget to change i want to wiggle
+    set_state(wiggle,10); //dont forget to change if want to wiggle
     set_state(adjust,adjust.new_state);
     set_state(sonar_core1,sonar_core1.new_state);
+    set_state(creep_backward,creep_backward.new_state);
+    set_state(rotate_right,rotate_right.new_state);
+    set_state(main_controller,main_controller.new_state);
 
     if(sonar_core1.state == 0){
       flag = 0;
@@ -811,7 +897,7 @@ void loop()
     PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
   }
 
-  //wiggle state
+  //wiggle outputs
 
   if(wiggle.state == 0){
     dutyCycle[7] = calcDutyCycle(servo10,0); //leg2 dn
@@ -868,6 +954,98 @@ void loop()
     PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
   }
 
+  //rotate right
+  if(rotate_right.state == 0){
+    dutyCycle[7] = calcDutyCycle(servo10,0);
+    dutyCycle[6] = calcDutyCycle(servo9,45);  
+    dutyCycle[3] = calcDutyCycle(servo6,0);  
+    dutyCycle[5] = calcDutyCycle(servo8,45);  
+    dutyCycle[0] = calcDutyCycle(servo1,45);
+    dutyCycle[2] = calcDutyCycle(servo5,0);
+    dutyCycle[1] = calcDutyCycle(servo2,45);
+    dutyCycle[4] = calcDutyCycle(servo7,0);
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+  }
+  else if(rotate_right.state == 1){
+    dutyCycle[7] = calcDutyCycle(servo10,20); //leg2 up
+    dutyCycle[6] = calcDutyCycle(servo9,70);  //leg2 bw
+    dutyCycle[3] = calcDutyCycle(servo6,20);  //leg3 up  
+    dutyCycle[5] = calcDutyCycle(servo8,70);  //leg3 fw
+    dutyCycle[0] = calcDutyCycle(servo1,70);  //leg1 bw
+    dutyCycle[2] = calcDutyCycle(servo5,0);
+    dutyCycle[1] = calcDutyCycle(servo2,70);  //leg4 fw
+    dutyCycle[4] = calcDutyCycle(servo7,0);
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+  }
+  else if(rotate_right.state == 2){
+    dutyCycle[7] = calcDutyCycle(servo10,0);  //leg2 dn
+    dutyCycle[6] = calcDutyCycle(servo9,70);  
+    dutyCycle[3] = calcDutyCycle(servo6,0);   //leg3 dn
+    dutyCycle[5] = calcDutyCycle(servo8,70);  
+    dutyCycle[0] = calcDutyCycle(servo1,70);  
+    dutyCycle[2] = calcDutyCycle(servo5,0);
+    dutyCycle[1] = calcDutyCycle(servo2,70);  
+    dutyCycle[4] = calcDutyCycle(servo7,0);
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+  }
+  else if(rotate_right.state == 3){
+    dutyCycle[7] = calcDutyCycle(servo10,0);  
+    dutyCycle[6] = calcDutyCycle(servo9,20);  //leg2 fw
+    dutyCycle[3] = calcDutyCycle(servo6,0);  
+    dutyCycle[5] = calcDutyCycle(servo8,20);  //leg3 bw
+    dutyCycle[0] = calcDutyCycle(servo1,20);  //leg1 fw
+    dutyCycle[2] = calcDutyCycle(servo5,20);  //leg1 up
+    dutyCycle[1] = calcDutyCycle(servo2,20);  //leg4 bw
+    dutyCycle[4] = calcDutyCycle(servo7,20);  //leg4 up
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+  }
+  else if(rotate_right.state == 4){
+    dutyCycle[7] = calcDutyCycle(servo10,0);  
+    dutyCycle[6] = calcDutyCycle(servo9,20);  
+    dutyCycle[3] = calcDutyCycle(servo6,0);  
+    dutyCycle[5] = calcDutyCycle(servo8,20);  
+    dutyCycle[0] = calcDutyCycle(servo1,20);  
+    dutyCycle[2] = calcDutyCycle(servo5,0);  //leg1 dn
+    dutyCycle[1] = calcDutyCycle(servo2,20);  
+    dutyCycle[4] = calcDutyCycle(servo7,0);  //leg4 dn
+    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);
+    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+  }
+
   //balance state
 
   if(self_balance.state == 0 ){
@@ -891,29 +1069,112 @@ void loop()
     PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
     PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
   }
+
+  //creep_backward output ()
+
+  if(creep_backward.state == 0){
+      dutyCycle[0] = calcDutyCycle(servo1,90);
+      dutyCycle[5] = calcDutyCycle(servo8,90);
+      dutyCycle[6] = calcDutyCycle(servo9,45);
+      dutyCycle[1] = calcDutyCycle(servo2,45);
+      dutyCycle[2] = calcDutyCycle(servo5,0);
+      PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+     
+    }else if(creep_backward.state == 1){
+      dutyCycle[3] = calcDutyCycle(servo6,50);
+      dutyCycle[5] = calcDutyCycle(servo8,20);
+      dutyCycle[0] = calcDutyCycle(servo1,90);
+      dutyCycle[6] = calcDutyCycle(servo9,45);
+      dutyCycle[1] = calcDutyCycle(servo2,45);
+      PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    }else if(creep_backward.state == 2){
+     
+      dutyCycle[5] = calcDutyCycle(servo8,45);
+      dutyCycle[0] = calcDutyCycle(servo1,45);
+      dutyCycle[6] = calcDutyCycle(servo9,20);
+      dutyCycle[1] = calcDutyCycle(servo2,90);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    }else if(creep_backward.state == 3){
+      dutyCycle[7] = calcDutyCycle(servo10,50);
+      dutyCycle[5] = calcDutyCycle(servo8,45);
+      dutyCycle[0] = calcDutyCycle(servo1,45);
+      dutyCycle[6] = calcDutyCycle(servo9,90);
+      dutyCycle[1] = calcDutyCycle(servo2,90);
+      PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[9]);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    }else if(creep_backward.state == 4){
+      dutyCycle[4] = calcDutyCycle(servo7,50);
+      dutyCycle[1] = calcDutyCycle(servo2,10);
+      dutyCycle[6] = calcDutyCycle(servo9,90);
+      dutyCycle[5] = calcDutyCycle(servo8,45);
+      dutyCycle[0] = calcDutyCycle(servo1,45);
+      PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    }else if(creep_backward.state == 5){
+      dutyCycle[1] = calcDutyCycle(servo2,45);
+      dutyCycle[6] = calcDutyCycle(servo9,45);
+      dutyCycle[5] = calcDutyCycle(servo8,90);
+      dutyCycle[0] = calcDutyCycle(servo1,20);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    }else if(creep_backward.state == 6){
+      dutyCycle[1] = calcDutyCycle(servo2,45);
+      dutyCycle[2] = calcDutyCycle(servo5,50);
+      dutyCycle[6] = calcDutyCycle(servo9,45);
+      dutyCycle[5] = calcDutyCycle(servo8,90);
+      dutyCycle[0] = calcDutyCycle(servo1,90);
+      PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+      PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]);
+      PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]);  
+      PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);
+      PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]);
+    }else if(creep_backward.state == 7){
+      dutyCycle[3] = calcDutyCycle(servo6,0);
+      PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
+    }else if(creep_backward.state == 8){
+      dutyCycle[7] = calcDutyCycle(servo10,0);
+      PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    }else if(creep_backward.state == 9){
+      dutyCycle[4] = calcDutyCycle(servo7,0);
+      PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]);
+    }else if(creep_backward.state == 10){
+      dutyCycle[2] = calcDutyCycle(servo5,0);
+      PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]);
+    }
    
     
-    /*
-    dutyCycle[2] = calcDutyCycle(servo5,30); // servo 5
-    dutyCycle[4] = calcDutyCycle(servo7,30);
-    dutyCycle[7] = calcDutyCycle(servo10,30);
-    dutyCycle[3] = calcDutyCycle(servo6,30);
-    PWM_Instance[2]->setPWM(servo5, frequency, dutyCycle[2]); 
-    PWM_Instance[4]->setPWM(servo7, frequency, dutyCycle[4]); 
-    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]); 
-    PWM_Instance[3]->setPWM(servo6, frequency, dutyCycle[3]);
-
-
-    //dutyCycle[6] = calcDutyCycle(servo9,65); //servo8
-    
-    dutyCycle[5] = calcDutyCycle(servo8,25); //servo7
-    dutyCycle[0] = calcDutyCycle(servo1,65);
-    dutyCycle[1] = calcDutyCycle(servo2,25);
-    PWM_Instance[6]->setPWM(servo9, frequency, dutyCycle[6]); //servo8
-    PWM_Instance[5]->setPWM(servo8, frequency, dutyCycle[5]); //servo7
-    //PWM_Instance[0]->setPWM(servo1, frequency, dutyCycle[0]); 
-    //PWM_Instance[1]->setPWM(servo2, frequency, dutyCycle[1]);*/ 
-    
+   Serial.print("creep backward state:");
+   Serial.println(creep_backward.state);
+   Serial.print("rotate left state:");
+   Serial.println(rotate_left.state);
+   Serial.print("creep forward state:");
+   Serial.println(creep_forward.state);
+   Serial.print("adjust state:");
+   Serial.println(adjust.state);
+   Serial.print("rotate right state:");
+   Serial.println(rotate_right.state);
+   Serial.print("main controller state:");
+   Serial.println(main_controller.state);
+   
     
     
 
