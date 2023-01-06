@@ -83,7 +83,7 @@ float calcDutyCycle(int servo, float angle){
   switch(servo){
 
     case servo1:
-      dc = 10.0/180.0*angle + 2.8;
+      dc = 10.0/180.0*angle + 2.4;
       return dc;
     case servo2:
       dc = 10.0/180.0*angle + 2.6;
@@ -211,11 +211,11 @@ void rot_l(){
   else if(rotate_left.state == 4 && rotate_left.tis > 100){
 
     rotate_left.new_state = 0;
-  }else if(rotate_left.state == 10 && ( (adjust.state == 1 && creep_forward.state == 50) || (main_controller.state == 2 && random_int == 0)) ){
+  }else if(rotate_left.state == 10 && creep_forward.state == 50  && creep_backward.state == 50 && ( (adjust.state == 1) || (main_controller.state == 2 && random_int == 0) ) ){
     rotate_left.new_state = 0;
-  }else if(rotate_left.state > 0 && adjust.state == 0){
+  }else if(rotate_left.state > 0 && (adjust.state == 0 && main_controller.state != 2)){
     rotate_left.new_state = 10;
-  }else if(self_balance.state == 0 || (adjust.state == 10 && main_controller.state != 1) ){
+  }else if(self_balance.state == 0 || (adjust.state == 10 ) ){
     rotate_left.new_state = 10;
   }
   
@@ -241,65 +241,65 @@ void rot_r(){
   else if(rotate_right.state == 4 && rotate_right.tis > 100){
 
     rotate_right.new_state = 0;
-  }else if(rotate_right.state == 10  && ( (adjust.state == 1 && creep_backward.state == 50) || (main_controller.state == 2 && random_int == 1))){
+  }else if(rotate_right.state == 10  && creep_backward.state == 50 && creep_forward.state == 50 && ( ( adjust.state == 1 ) || (main_controller.state == 2 && random_int == 1))){
 
     rotate_right.new_state = 0;
-  }else if(rotate_right.state > 0 && adjust.state == 0 ){
+  }else if(rotate_right.state > 0 && (adjust.state == 0 && main_controller.state != 2) ){
 
     rotate_right.new_state = 10;
-  }else if(self_balance.state == 0 || (adjust.state == 10 && main_controller.state != 1)){
+  }else if(self_balance.state == 0 || (adjust.state == 10 )){
 
     rotate_right.new_state = 10;
   }
 }
 
 void c_backward(){  //change this to include main controller, also change creep_forward
-  if(creep_backward.state == 0 && creep_backward.tis > 200){
+    if(creep_backward.state == 0 && creep_backward.tis > 200 && main_controller.state == 0 && adjust.state != 1){
 
       creep_backward.new_state = 1;
 
-    }else if(creep_backward.state == 1 && creep_backward.tis > 100){
+    }else if(creep_backward.state == 1 && creep_backward.tis > 100 && main_controller.state == 0 && adjust.state != 1){
 
       creep_backward.new_state = 7;
 
-    }else if(creep_backward.state == 7 && creep_backward.tis > 200){
+    }else if(creep_backward.state == 7 && creep_backward.tis > 200 && main_controller.state == 0 && adjust.state != 1){
       creep_backward.new_state = 2;
     }
-    else if(creep_backward.state == 2 && creep_backward.tis > 200){
+    else if(creep_backward.state == 2 && creep_backward.tis > 200 && main_controller.state == 0 && adjust.state != 1){
 
       creep_backward.new_state = 3;
 
-    }else if(creep_backward.state == 8 && creep_backward.tis > 200){
+    }else if(creep_backward.state == 8 && creep_backward.tis > 200 && main_controller.state == 0 && adjust.state != 1){
 
       creep_backward.new_state = 4;
 
     }
-    else if(creep_backward.state == 3 && creep_backward.tis > 100){
+    else if(creep_backward.state == 3 && creep_backward.tis > 100 && main_controller.state == 0 && adjust.state != 1){
 
       creep_backward.new_state = 8;
 
-    }else if(creep_backward.state == 4 && creep_backward.tis > 100){
+    }else if(creep_backward.state == 4 && creep_backward.tis > 100 && main_controller.state == 0 && adjust.state != 1){
 
       creep_backward.new_state = 9;
 
-    }else if(creep_backward.state == 9 && creep_backward.tis > 200){
+    }else if(creep_backward.state == 9 && creep_backward.tis > 200 && main_controller.state == 0 && adjust.state != 1){
 
       creep_backward.new_state = 5;
 
     }
-    else if(creep_backward.state == 5 && creep_backward.tis > 100){
+    else if(creep_backward.state == 5 && creep_backward.tis > 100 && main_controller.state == 0 && adjust.state != 1){
 
       creep_backward.new_state = 6;
 
-    }else if(creep_backward.state == 6 && creep_backward.tis > 80){
+    }else if(creep_backward.state == 6 && creep_backward.tis > 80 && main_controller.state == 0 && adjust.state != 1){
 
       creep_backward.new_state = 10;
 
-    }else if(creep_backward.state == 10 && creep_backward.tis > 100){
+    }else if(creep_backward.state == 10 && creep_backward.tis > 100 && main_controller.state == 0 && adjust.state != 1){
 
       creep_backward.new_state = 0;
 
-    }else if(self_balance.state == 0 || main_controller.state == 1){ // if the robot is balancing/turning, it cant be moving
+    }else if(self_balance.state == 0 || main_controller.state != 0 || adjust.state == 1 || creep_forward.state != 50){ // if the robot is balancing/turning/adjusting, it cant be moving
       creep_backward.new_state = 50;
     }else if(creep_backward.state == 50 && self_balance.state != 0 && main_controller.state == 0){
       creep_backward.new_state = 0;
@@ -309,17 +309,20 @@ void c_backward(){  //change this to include main controller, also change creep_
 //comparations of distance32 w/ 0 are because sometimes the sensor bugs and reads 0
 void m_cont(){
 
-  if(main_controller.state == 0 && distance32 <= 7 && distance32 != 0){ // when state = 0, walks(creep_backward)
-    main_controller.new_state = 1; //go back
-    randomSeed(millis());
-    random_int = random(2);
+  if(main_controller.state == 0 && distance32 <= 16 && distance32 != 0){ // when state = 0, walks forward(creep_backward)
+    main_controller.new_state = 5; //go back
 
-  }else if(main_controller.state == 1 && main_controller.tis > 800){
+    randomSeed(millis()); //decide if turns left or right
+    random_int = random(2);
+  }else if(main_controller.state == 5 && main_controller.tis > 100){
+    main_controller.new_state = 1;
+  }else if(main_controller.state == 1 && main_controller.tis > 500){
     main_controller.new_state = 2; // turn left or right
 
-  }else if(main_controller.state == 2 && main_controller.tis > 600 && (distance32 > 15 || distance32 == 0)){ //when state = 1, turns left or right
+  }else if(main_controller.state == 2 && main_controller.tis > 1500 && distance32 > 30){ //when state = 1, turns left or right
     main_controller.new_state = 0; //after turning, if there's space in front, go back to walk
-  }else if(main_controller.state == 50){
+  }
+  else if(main_controller.state == 50){
       main_controller.new_state = 50;
   }
   
@@ -360,9 +363,13 @@ void wig(){
 void adj(){
   if(adjust.state == 0 && adjust.tis > 6000){
     adjust.new_state = 1;
+  }else if(adjust.state < 10 && main_controller.state != 0){
+    adjust.new_state = 3;
+  }else if(main_controller.state == 0 && adjust.state == 3){
+    adjust.new_state = 0;
   }else if(adjust.state == 1 && adjust.tis > 400){
     adjust.new_state = 0;
-  }else if(self_balance.state == 0 || main_controller.state == 1){  //dont adjust if its turning
+  }else if(self_balance.state == 0){  //dont adjust if its turning
     adjust.new_state = 10;
   }
 }
@@ -445,14 +452,14 @@ void setup()
   }
 
   set_state(creep_forward,50); //0 to walk, 50 to turn off
-  set_state(rotate_left,10);  //not working right, careful when calling rot_l and setstate in loop
+  set_state(rotate_left,10);  
   set_state(wiggle,10);       //0 to wiggle, 10 to turn off
   set_state(adjust,0);        //0 to walk, 10 to turn off
-  set_state(self_balance,1); //0 to balance, 1 to disable
+  set_state(self_balance,1); //0 to selfbalance, 1 to disable
   set_state(sonar_core1,0);
-  set_state(creep_backward,00); //0 to walk, 50 to turn off, this is actually walking forward, not backward
+  set_state(creep_backward,0); //0 to walk, 50 to turn off, this is actually walking forward, not backward
   set_state(rotate_right,10);
-  set_state(main_controller,0); //controls the obstacle avoidance
+  set_state(main_controller,0); //controls the obstacle avoidance, 0 to enable 50 to disable
 
   //attachInterrupt(echoPin,echo_rising_edge,CHANGE);
 
@@ -628,65 +635,69 @@ void loop()
     //uint32_t PWM_Pins[]       = { servo1, servo2, servo5, servo6, servo7, servo8, servo9, servo10 }; para ver quais servos em que pinos
     //servo 9 together w 10, servo6 w 8
     //servo testing
-    
-    rot_l();
-    wig();
+
+
+
+    m_cont();
     adj();
     c_backward();
     rot_r();
-    m_cont();
+    rot_l();
+    wig();
+    
+    
 
-    if(creep_forward.state == 0 && creep_forward.tis > 200 && adjust.state != 1){
+    if(creep_forward.state == 0 && creep_forward.tis > 200 && adjust.state != 1 && main_controller.state == 1){
 
       creep_forward.new_state = 1;
 
-    }else if(self_balance.state == 0 || main_controller.state == 1){     //IF SELFBALANCE/turning ACTIVE, DOESNT CREEP!!!!
+    }else if(self_balance.state == 0 || main_controller.state != 1){     //IF SELFBALANCE/turning ACTIVE, DOESNT CREEP!!!!
       creep_forward.new_state = 50;
     }
-    else if(creep_forward.state == 1 && creep_forward.tis > 100 && adjust.state != 1){
+    else if(creep_forward.state == 1 && creep_forward.tis > 100 && adjust.state != 1 && main_controller.state == 1){
 
       creep_forward.new_state = 7;
 
-    }else if(creep_forward.state == 7 && creep_forward.tis > 200 && adjust.state != 1){
+    }else if(creep_forward.state == 7 && creep_forward.tis > 200 && adjust.state != 1 && main_controller.state == 1){
       creep_forward.new_state = 2;
     }
-    else if(creep_forward.state == 2 && creep_forward.tis > 200 && adjust.state != 1){
+    else if(creep_forward.state == 2 && creep_forward.tis > 200 && adjust.state != 1 && main_controller.state == 1){
 
       creep_forward.new_state = 3;
 
-    }else if(creep_forward.state == 8 && creep_forward.tis > 200 && adjust.state != 1){
+    }else if(creep_forward.state == 8 && creep_forward.tis > 200 && adjust.state != 1 && main_controller.state == 1){
 
       creep_forward.new_state = 4;
 
     }
-    else if(creep_forward.state == 3 && creep_forward.tis > 100 && adjust.state != 1){
+    else if(creep_forward.state == 3 && creep_forward.tis > 100 && adjust.state != 1 && main_controller.state == 1){
 
       creep_forward.new_state = 8;
 
-    }else if(creep_forward.state == 4 && creep_forward.tis > 100 && adjust.state != 1){
+    }else if(creep_forward.state == 4 && creep_forward.tis > 100 && adjust.state != 1 && main_controller.state == 1){
 
       creep_forward.new_state = 9;
 
-    }else if(creep_forward.state == 9 && creep_forward.tis > 200 && adjust.state != 1){
+    }else if(creep_forward.state == 9 && creep_forward.tis > 200 && adjust.state != 1 && main_controller.state == 1){
 
       creep_forward.new_state = 5;
 
     }
-    else if(creep_forward.state == 5 && creep_forward.tis > 300 && adjust.state != 1){
+    else if(creep_forward.state == 5 && creep_forward.tis > 300 && adjust.state != 1 && main_controller.state == 1){
 
       creep_forward.new_state = 6;
 
-    }else if(creep_forward.state == 6 && creep_forward.tis > 80 && adjust.state != 1){
+    }else if(creep_forward.state == 6 && creep_forward.tis > 80 && adjust.state != 1 && main_controller.state == 1){
 
       creep_forward.new_state = 10;
 
-    }else if(creep_forward.state == 10 && creep_forward.tis > 100 && adjust.state != 1){
+    }else if(creep_forward.state == 10 && creep_forward.tis > 100 && adjust.state != 1 && main_controller.state == 1){
 
       creep_forward.new_state = 0;
 
-    }else if(creep_forward.state > 0 && (adjust.state == 1 || creep_backward.state != 50) ){
+    }else if(creep_forward.state > 0 && (adjust.state == 1 || creep_backward.state != 50 || main_controller.state != 1) ){
       creep_forward.new_state = 50;
-    }else if(creep_forward.state == 50 && adjust.state == 0 && self_balance.state == 1 && (main_controller.state == 0 || main_controller.state == 1) && creep_backward.state == 50){
+    }else if(creep_forward.state == 50 && (adjust.state == 0 || adjust.state == 10) && self_balance.state == 1 && creep_backward.state == 50 && main_controller.state == 1){
       creep_forward.new_state = 0;
     }
 
@@ -1174,6 +1185,11 @@ void loop()
    Serial.println(rotate_right.state);
    Serial.print("main controller state:");
    Serial.println(main_controller.state);
+   Serial.print("Roll and pitch:");
+   Serial.println(finalRoll);
+   if(creep_backward.state != 50 && creep_forward.state != 50){
+    Serial.println("HELOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO");
+   }
    
     
     
