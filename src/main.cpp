@@ -38,9 +38,10 @@ typedef struct {
 // Input variables
 uint8_t S1, prevS1, RE_S1;
 uint8_t S2, prevS2, RE_S2;*/
-long sonarDuration;
-long distance;
-uint32_t distance32;
+
+uint32_t duration, distanceInterrupt;
+int distanceReady;
+
 /*
 // Output variables
 
@@ -73,8 +74,8 @@ LIS3DH myIMU;
 float calcDutyCycle(int servo, float angle){
   float dc;
 
-  if(angle < 0){
-    angle = 0;
+  if(angle < 10){
+    angle = 10;
   }
   if(angle > 160){
     angle = 160;
@@ -83,9 +84,15 @@ float calcDutyCycle(int servo, float angle){
   switch(servo){
 
     case servo1:
+      if(angle > 80){
+        angle = 80;
+      }
       dc = 10.0/180.0*angle + 2.4;
       return dc;
     case servo2:
+    if(angle > 80){
+        angle = 80;
+      }
       dc = 10.0/180.0*angle + 2.6;
       return dc;
     case servo5:
@@ -99,12 +106,18 @@ float calcDutyCycle(int servo, float angle){
       dc = 10.0/180.0*angle + 2.45;
       return dc;
     case servo8:
+    if(angle > 80){
+        angle = 80;
+      }
       angle = 90 - angle;
       dc = 9.8/180.0*angle + 3;
       return dc;
     case servo9:
+    if(angle > 80){
+        angle = 80;
+      }
       angle = 90 - angle;
-      dc = 9.7/180.0*angle + 2.8;
+      dc = 9.7/180.0*angle + 3.2;
       return dc;
     case servo10:
       dc = 10.1/180.0*angle + 2.8;
@@ -119,41 +132,7 @@ float calcDutyCycle(int servo, float angle){
 uint32_t echo_end,trig_beg;
 int event_trig = 0;
 
-float getDistance(){
 
-  //returns distance from nearest object in cm
-  
-  int state=0;
-  long auxtemp=micros();
-  float distance=0;
-
-  digitalWrite(trigPin,LOW);
-
-  while (auxtemp - micros() < 25){
-
-    if(state == 0 && micros() - auxtemp > 2){
-      
-      state = 1;
-      digitalWrite(trigPin,HIGH);
-      auxtemp=micros();
-      
-
-    } else if (state == 1 && micros() - auxtemp > 10){
-      
-      digitalWrite(trigPin,LOW);
-      trig_beg = micros();
-      auxtemp = micros();
-      state = 0;
-      /*sonarDuration = read_pulse(echoPin);
-      distance = sonarDuration * 0.034 / 2;
-      auxtemp = micros();
-      state = 0;*/
-    }
-    
-  }
-  return 1;
-
-}
 
 double getPitch(){
 
@@ -306,10 +285,10 @@ void c_backward(){  //change this to include main controller, also change creep_
     }
 }
 
-//comparations of distance32 w/ 0 are because sometimes the sensor bugs and reads 0
+//comparations of distanceInterrupt w/ 0 are because sometimes the sensor bugs and reads 0
 void m_cont(){
 
-  if(main_controller.state == 0 && distance32 <= 16 && distance32 != 0){ // when state = 0, walks forward(creep_backward)
+  if(main_controller.state == 0 && distanceInterrupt <= 16 && distanceInterrupt != 0){ // when state = 0, walks forward(creep_backward)
     main_controller.new_state = 5; //go back
 
     randomSeed(millis()); //decide if turns left or right
@@ -319,7 +298,7 @@ void m_cont(){
   }else if(main_controller.state == 1 && main_controller.tis > 500){
     main_controller.new_state = 2; // turn left or right
 
-  }else if(main_controller.state == 2 && main_controller.tis > 1500 && distance32 > 30){ //when state = 1, turns left or right
+  }else if(main_controller.state == 2 && main_controller.tis > 1500 && distanceInterrupt > 30){ //when state = 1, turns left or right
     main_controller.new_state = 0; //after turning, if there's space in front, go back to walk
   }
   else if(main_controller.state == 50){
@@ -374,19 +353,7 @@ void adj(){
   }
 }
 
-uint32_t echo_beg = 0;
-void echo_rising_edge(){
-  if(digitalRead(echoPin)){
-    echo_beg = micros();
-  }
-  if(!digitalRead(echoPin)){
-    echo_end = micros();
-    distance = (echo_end - echo_beg) / 1e3 * 0.034 / 2;
-  }
 
-  event_trig = 1;
-
-}
 
 
 float frequency = 50;
@@ -454,7 +421,7 @@ void setup()
   set_state(creep_forward,50); //0 to walk, 50 to turn off
   set_state(rotate_left,10);  
   set_state(wiggle,10);       //0 to wiggle, 10 to turn off
-  set_state(adjust,0);        //0 to walk, 10 to turn off
+  set_state(adjust,10);        //0 to walk, 10 to turn off
   set_state(self_balance,1); //0 to selfbalance, 1 to disable
   set_state(sonar_core1,0);
   set_state(creep_backward,0); //0 to walk, 50 to turn off, this is actually walking forward, not backward
@@ -468,6 +435,28 @@ void setup()
  
 }
 
+
+void echoInterrupt() {
+  
+   if (digitalRead(echoPin) == LOW) {
+    // Pulse is low, calculate the duration of the pulse
+    duration = micros() - duration;
+
+    // Calculate the distance based on the duration of the pulse and the speed of sound
+    distanceInterrupt = duration * 0.034 / 2;
+
+    // Distance is updated
+    distanceReady = 1;
+  } else {
+    // Pulse is high, save the current time
+    duration = micros();
+  }
+  
+}
+
+
+
+
 //setup for second core
 
 void setup1(){
@@ -475,6 +464,8 @@ void setup1(){
   pinMode(echoPin,INPUT);
   pinMode(trigPin,OUTPUT);
   delay(800);
+
+  attachInterrupt(digitalPinToInterrupt(echoPin),echoInterrupt,CHANGE);
 
 }
 
@@ -488,7 +479,18 @@ void loop1(){
   static unsigned long last_cycle1 = 0;
 
   unsigned long curr_time1 = millis();
-  if (curr_time1 - last_cycle1 >= 50) {
+  if (curr_time1 - last_cycle1 >= 50){
+
+    
+    if (distanceReady) {
+      // Send the distance to Core0 using the FIFO when distance is updated
+      rp2040.fifo.push_nb(distanceInterrupt);
+
+      // Clear the distanceReady flag
+      distanceReady = false;
+    }
+    
+   
     // Send a pulse to the trigger pin
     digitalWrite(trigPin, LOW);
     delayMicroseconds(2);
@@ -496,7 +498,7 @@ void loop1(){
     delayMicroseconds(10);
     digitalWrite(trigPin, LOW);
 
-    // Measure the time it takes for the pulse to return
+    /*    // Measure the time it takes for the pulse to return
     long duration1 = pulseIn(echoPin, HIGH);
 
     // Calculate the distance based on the speed of sound and the time it took for the pulse to return
@@ -504,6 +506,7 @@ void loop1(){
 
     // Write the distance to the FIFO buffer
     rp2040.fifo.push_nb(distance1);
+    */
     
     // Update the last measurement time
     last_cycle1 = curr_time1;
@@ -532,14 +535,24 @@ void loop()
   
     //update inputs
     
-    //this function does not change the value in distance32 if fifo is empty, and never blocks the execution of the program
-    rp2040.fifo.pop_nb(&distance32);
+    //this function does not change the value in distanceInterrupt if fifo is empty, and never blocks the execution of the program
+    rp2040.fifo.pop_nb(&distanceInterrupt);
     
     thetaP = getPitch();
     thetaR = getRoll();
 
     Serial.println("Distance");
-    Serial.println(distance32);
+    Serial.println(distanceInterrupt);
+
+    /*
+    dutyCycle[7] = calcDutyCycle(servo10,90);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    delay(500);
+    dutyCycle[7] = calcDutyCycle(servo10,45);
+    PWM_Instance[7]->setPWM(servo10, frequency, dutyCycle[7]);
+    delay(500);
+    */
+    
     /*
     
 
@@ -716,6 +729,7 @@ void loop()
     set_state(rotate_right,rotate_right.new_state);
     set_state(main_controller,main_controller.new_state);
 
+ 
     if(sonar_core1.state == 0){
       flag = 0;
     }else if(sonar_core1.state == 1){
